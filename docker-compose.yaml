@@ -1,0 +1,138 @@
+version: "3"
+
+services:  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,OUTSIDE://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://host.docker.internal:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:6.0.1
+    hostname: control-center
+    depends_on:
+      - kafka
+    ports:
+      - "9021:9021"
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_CONNECT_CLUSTER: http://kafka-connect:8083
+      PORT: 9021
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect-base:6.0.0
+    container_name: kafka-connect
+    depends_on:
+      - zookeeper
+      - kafka
+    ports:
+      - 8083:8083
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: kafka-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_LOG4J_ROOT_LOGLEVEL: "INFO"
+      CONNECT_LOG4J_LOGGERS: "org.apache.kafka.connect.runtime.rest=WARN,org.reflections=ERROR"
+      CONNECT_LOG4J_APPENDER_STDOUT_LAYOUT_CONVERSIONPATTERN: "[%d] %p %X{connector.context}%m (%c:%L)%n"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/data/connect-jars
+    volumes:
+      - $PWD/data:/data
+      - ./connect-jars/mariadb-connector-java.jar:/usr/share/java/kafka/mariadb-connector-java.jar
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing Connector"
+        confluent-hub install --no-prompt debezium/debezium-connector-mysql:2.2.1
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.2
+        #
+        echo "Launching Kafka Connect worker"
+        /etc/confluent/docker/run &
+        #
+        sleep infinity
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  mariadb1:
+    image: mariadb:10.6.4
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_LOG_BIN: ROW
+      MYSQL_BINLOG_FORMAT: ROW
+      MYSQL_USER: root
+      MYSQL_DATABASE: inova
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./data/mariadb1:/var/lib/mysql
+      - ./config/my.cnf:/etc/mysql/my.cnf
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  mariadb2:
+    image: mariadb:10.6.4
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_LOG_BIN: ROW
+      MYSQL_USER: root
+      MYSQL_BINLOG_FORMAT: ROW
+      MYSQL_DATABASE: inova
+    ports:
+      - "23306:3306"
+    volumes:
+      - ./data/mariadb2:/var/lib/mysql
+      - ./config/my.cnf:/etc/mysql/my.cnf
+
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  mariadb3:
+    image: mariadb:10.6.4
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_LOG_BIN: ROW
+      MYSQL_BINLOG_FORMAT: ROW
+      MYSQL_USER: root
+      MYSQL_DATABASE: inova
+    ports:
+      - "33306:3306"
+    volumes:
+      - ./data/mariadb3:/var/lib/mysql
+      - ./config/my.cnf:/etc/mysql/my.cnf
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
